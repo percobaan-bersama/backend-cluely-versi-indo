@@ -12,20 +12,30 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-Settings.llm = Groq(
-    model="llama-3.3-70b-versatile", 
-    api_key=os.getenv("GROQ_API_KEY")
-)
-
 Settings.embed_model = JinaEmbedding(
     api_key=os.getenv("JINA_API_KEY"),
     model="jina-embeddings-v3",
     task="retrieval.passage",
 )
 
+from app.services.llm import MODELS
+
+def get_llm(model_name: str):
+    return Groq(
+        model=model_name,
+        api_key=os.getenv("GROQ_API_KEY")
+    )
+
+Settings.llm = get_llm(MODELS[0])
+
 PERSIST_DIR = "./storage"
+_index = None
 
 def get_index(is_async: bool = False):
+    global _index
+    if _index is not None:
+        return _index
+        
     qdrant_url = os.getenv("QDRANT_CLUSTER_ENDPOINT") or os.getenv("QDRANT_URL")
     qdrant_api_key = os.getenv("QDRANT_API_KEY")
 
@@ -68,13 +78,15 @@ def get_index(is_async: bool = False):
             )
         
         print(f"VectorStoreIndex initialized from {qdrant_url or './storage/qdrant'}")
-        return VectorStoreIndex.from_vector_store(vector_store)
+        _index = VectorStoreIndex.from_vector_store(vector_store)
+        return _index
     except Exception as e:
         print(f"Error initializing VectorStoreIndex: {e}")
-        return VectorStoreIndex.from_documents(
+        _index = VectorStoreIndex.from_documents(
             [], 
             storage_context=StorageContext.from_defaults(vector_store=vector_store)
         )
+        return _index
 
 async def ingest_document_from_url(url: str, filename: str):
     import httpx
@@ -105,33 +117,39 @@ async def ingest_document_from_url(url: str, filename: str):
             raise Exception(f"Failed to download file from {url}")
 
 async def get_rag_suggestion(query: str, chat_history: List[Dict] = None) -> str:
-    try:
-        index = get_index()
-        
-        history_messages = []
-        if chat_history:
-            for msg in chat_history:
-                role = MessageRole.USER if msg["role"] == "user" else MessageRole.ASSISTANT
-                history_messages.append(ChatMessage(role=role, content=msg["content"]))
+    last_error = None
+    for model_name in MODELS:
+        try:
+            Settings.llm = get_llm(model_name)
+            index = get_index()
+            
+            history_messages = []
+            if chat_history:
+                for msg in chat_history:
+                    role = MessageRole.USER if msg["role"] == "user" else MessageRole.ASSISTANT
+                    history_messages.append(ChatMessage(role=role, content=msg["content"]))
 
-        reranker = JinaRerank(
-            api_key=os.getenv("JINA_API_KEY"),
-            model="jina-reranker-v3",
-            top_n=3
-        )
+            reranker = JinaRerank(
+                api_key=os.getenv("JINA_API_KEY"),
+                model="jina-reranker-v3",
+                top_n=3
+            )
 
-        chat_engine = index.as_chat_engine(
-            chat_mode="condense_plus_context",
-            system_prompt=(
-                "You are Cluely, an intelligent meeting assistant. "
-                "Provide helpful suggestions, hints, or brief recommendations based on the transcript and context. "
-                "Keep suggestions concise and relevant to the ongoing conversation."
-            ),
-            node_postprocessors=[reranker]
-        )
-        
-        response = await chat_engine.achat(query, chat_history=history_messages)
-        return str(response)
-        
-    except Exception as e:
-        return f"Maaf, terjadi kesalahan pada sistem RAG: {str(e)}"
+            chat_engine = index.as_chat_engine(
+                chat_mode="condense_plus_context",
+                system_prompt=(
+                    "You are Cluely, an intelligent meeting assistant. "
+                    "Provide helpful suggestions, hints, or brief recommendations based on the transcript and context. "
+                    "Keep suggestions concise and relevant to the ongoing conversation."
+                ),
+                node_postprocessors=[reranker]
+            )
+            
+            response = await chat_engine.achat(query, chat_history=history_messages)
+            return str(response)
+        except Exception as e:
+            print(f"Error with RAG model {model_name}: {e}")
+            last_error = e
+            continue
+            
+    return f"Maaf, terjadi kesalahan pada sistem RAG: {str(last_error)}"
