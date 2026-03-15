@@ -1,26 +1,33 @@
 import uuid
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import os
+import json
 
-from app.services.rag import get_rag_suggestion, ingest_document_from_url
+import asyncio
+from app.services.rag import get_rag_suggestion, ingest_document_from_url, is_index_empty, initialize_rag_service
+from app.services.llm import get_streaming_response
 from app.services.database import get_session_history, save_session_history, delete_session
 
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Cluely V2", description="Meeting/Interview Conversation Assistant")
 
-# Add CORS middleware
+@app.on_event("startup")
+async def startup_event():
+    
+    await initialize_rag_service()
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development, allow all. Change to specific domains in production.
+    allow_origins=["*"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Sessions are now handled by Supabase for persistence.
-# sessions: dict[str, list[dict]] = {}
 
 class ChatRequest(BaseModel):
     message: str
@@ -45,27 +52,61 @@ class TranscriptionRequest(BaseModel):
 async def transcribe(request: TranscriptionRequest):
     return TranscriptionResponse(text=request.text)
 
-@app.post("/api/chat", response_model=ChatResponse)
+@app.post("/api/chat")
 async def chat(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
     
-    # Get history from database
-    history = await get_session_history(session_id)
+    history_task = get_session_history(session_id)
+    index_empty_task = is_index_empty()
     
-    # Add new user message
+    history, rag_empty = await asyncio.gather(history_task, index_empty_task)
+    
     history.append({"role": "user", "content": request.message})
     
-    # Get RAG suggestion using the history (excluding the current user message for the "history" parameter if needed, 
-    # but get_rag_suggestion seems to take the last N messages)
-    response_text = await get_rag_suggestion(request.message, chat_history=history[:-1])
     
-    # Add assistant response
-    history.append({"role": "assistant", "content": response_text})
+    if rag_empty:
+        print("RAG is empty, falling back to standard LLM")
+        response_stream = get_streaming_response(history)
+    else:
+        response_stream = await get_rag_suggestion(request.message, chat_history=history[:-1])
+        print("wait for RAG")
     
-    # Save back to database
-    await save_session_history(session_id, history)
+    async def event_generator():
+        full_response = ""
+        
+        try:
+            if hasattr(response_stream, "async_response_gen"):
+                async for chunk in response_stream.async_response_gen():
+                    if isinstance(chunk, str):
+                        token = chunk
+                    else:
+                        token = getattr(chunk, 'delta', None) or str(chunk)
+                    
+                    if token:
+                        full_response += token
+                        yield token
+            else:
+                async for token in response_stream:
+                    if token:
+                        full_response += token
+                        yield token
+        except Exception as e:
+            print(f"Error in event_generator: {e}")
+            yield f"\n[Error: {str(e)}]"
+
+        if full_response:
+            history.append({"role": "assistant", "content": full_response})
+            await save_session_history(session_id, history)
     
-    return ChatResponse(response=response_text, session_id=session_id)
+    return StreamingResponse(
+        event_generator(), 
+        media_type="text/event-stream", 
+        headers={
+            "X-Session-ID": session_id,
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 @app.post("/api/session/clear")
 async def clear_session(session_id: str = ""):

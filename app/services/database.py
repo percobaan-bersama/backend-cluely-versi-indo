@@ -39,7 +39,7 @@ async def save_session_history(session_id: str, history: list[dict]):
             "history": history,
             "updated_at": "now()"
         }
-        # Upsert: update if session_id exists, otherwise insert
+        
         supabase.table("chat_sessions").upsert(data).execute()
     except Exception as e:
         print(f"Error saving session history: {e}")
