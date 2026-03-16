@@ -73,7 +73,10 @@ async def get_session_history(session_id: str) -> list[dict]:
                 session_id,
             )
             if row and row["history"]:
-                return row["history"]
+                history = row["history"]
+                if isinstance(history, str):
+                    return json.loads(history)
+                return history
     except Exception as e:
         print(f"Error fetching session history from PostgreSQL: {e}")
 
