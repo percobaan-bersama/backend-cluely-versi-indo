@@ -52,7 +52,7 @@ Menginstruksikan backend untuk mengambil dokumen dari URL (misal: S3/UploadThing
 - **CORS**: Sudah diaktifkan untuk semua origin (`*`) pada lingkungan development.
 - **Authentication**: Saat ini tidak memerlukan auth header, namun pastikan API Key sudah terpasang di `.env` backend.
 - **Format Data**: Selalu gunakan `Content-Type: application/json` kecuali untuk upload file.
-- **Database Session**: Backend memakai PostgreSQL langsung melalui `DATABASE_URL`.
+- **Database Session**: Backend memakai PostgreSQL langsung melalui `DATABASE_URL`. Kalau `DATABASE_URL` tidak diisi, backend fallback ke `127.0.0.1:5432` dengan default `DB_NAME=cluely`, `DB_USER=password`, `DB_PASSWORD=password`.
 
 ## Setup PostgreSQL Lokal / VPS
 
@@ -71,16 +71,48 @@ docker run -d \
   postgres:16
 ```
 
-### 2. Set `.env` backend
+### 2. Set `.env` backend di VPS
 ```env
 DATABASE_URL=postgresql://cluely_user:ganti-password-kuat@IP_VPS_ANDA:5432/cluely
 GROQ_API_KEY=your-groq-key
 JINA_API_KEY=your-jina-key
-QDRANT_URL=http://IP_VPS_ANDA:6333
-QDRANT_API_KEY=
+QDRANT_URL=your-qdrant-cloud-url
+QDRANT_API_KEY=your-qdrant-api-key
 ```
 
-### 3. Tabel session
+### 3. Setup lokal
+
+Kalau PostgreSQL lokal kamu jalan di Docker dengan kredensial default latihan:
+
+```bash
+docker run -d \
+  --name cluely-postgres \
+  --restart unless-stopped \
+  -e POSTGRES_DB=cluely \
+  -e POSTGRES_USER=password \
+  -e POSTGRES_PASSWORD=password \
+  -p 5432:5432 \
+  -v cluely-postgres-data:/var/lib/postgresql/data \
+  postgres:16
+```
+
+Backend lokal akan otomatis mencoba konek ke:
+
+```text
+postgresql://password:password@127.0.0.1:5432/cluely
+```
+
+Kalau mau override, cukup isi env berikut:
+
+```env
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_NAME=cluely
+DB_USER=password
+DB_PASSWORD=password
+```
+
+### 4. Tabel session
 Tabel `chat_sessions` akan dibuat otomatis saat backend startup. Skemanya:
 
 ```sql
@@ -91,7 +123,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 );
 ```
 
-### 4. Cek koneksi dari VPS
+### 5. Cek koneksi dari VPS
 ```bash
 docker exec -it cluely-postgres psql -U cluely_user -d cluely -c '\dt'
 ```

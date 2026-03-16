@@ -6,23 +6,39 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
 postgres_pool: asyncpg.Pool | None = None
+
+
+def _get_database_url() -> str | None:
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        return database_url
+
+    db_host = os.getenv("DB_HOST", "127.0.0.1")
+    db_port = os.getenv("DB_PORT", "5432")
+    db_name = os.getenv("DB_NAME", "cluely")
+    db_user = os.getenv("DB_USER", "password")
+    db_password = os.getenv("DB_PASSWORD", "password")
+
+    return f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 
 
 async def initialize_database():
     global postgres_pool
 
-    if not DATABASE_URL or postgres_pool is not None:
+    database_url = _get_database_url()
+    if not database_url or postgres_pool is not None:
         return
 
     try:
         postgres_pool = await asyncpg.create_pool(
-            dsn=DATABASE_URL,
+            dsn=database_url,
             min_size=1,
             max_size=5,
         )
         async with postgres_pool.acquire() as conn:
+            # Prevent concurrent workers from racing on first-time schema setup.
+            await conn.execute("SELECT pg_advisory_lock(424242)")
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -32,6 +48,7 @@ async def initialize_database():
                 )
                 """
             )
+            await conn.execute("SELECT pg_advisory_unlock(424242)")
     except Exception as e:
         print(f"Error initializing PostgreSQL: {e}")
         postgres_pool = None
