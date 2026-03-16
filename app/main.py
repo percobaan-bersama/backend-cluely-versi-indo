@@ -8,7 +8,13 @@ import json
 import asyncio
 from app.services.rag import get_rag_suggestion, ingest_document_from_url, is_index_empty, initialize_rag_service
 from app.services.llm import get_streaming_response
-from app.services.database import get_session_history, save_session_history, delete_session
+from app.services.database import (
+    close_database,
+    delete_session,
+    get_session_history,
+    initialize_database,
+    save_session_history,
+)
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -16,8 +22,13 @@ app = FastAPI(title="Cluely V2", description="Meeting/Interview Conversation Ass
 
 @app.on_event("startup")
 async def startup_event():
-    
+    await initialize_database()
     await initialize_rag_service()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await close_database()
 
 
 app.add_middleware(

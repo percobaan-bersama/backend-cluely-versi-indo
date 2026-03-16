@@ -1,54 +1,98 @@
-import os
-from supabase import create_client, Client
-from dotenv import load_dotenv
 import json
+import os
+
+import asyncpg
+from dotenv import load_dotenv
 
 load_dotenv()
 
-url: str = os.getenv("SUPABASE_URL")
-key: str = os.getenv("SUPABASE_KEY")
+DATABASE_URL = os.getenv("DATABASE_URL")
+postgres_pool: asyncpg.Pool | None = None
 
-supabase: Client = None
 
-if url and key and url != "your-supabase-url-here":
+async def initialize_database():
+    global postgres_pool
+
+    if not DATABASE_URL or postgres_pool is not None:
+        return
+
     try:
-        supabase = create_client(url, key)
+        postgres_pool = await asyncpg.create_pool(
+            dsn=DATABASE_URL,
+            min_size=1,
+            max_size=5,
+        )
+        async with postgres_pool.acquire() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    history JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
     except Exception as e:
-        print(f"Error initializing Supabase: {e}")
+        print(f"Error initializing PostgreSQL: {e}")
+        postgres_pool = None
+
+
+async def close_database():
+    global postgres_pool
+
+    if postgres_pool is not None:
+        await postgres_pool.close()
+        postgres_pool = None
+
 
 async def get_session_history(session_id: str) -> list[dict]:
-    if not supabase:
+    if postgres_pool is None:
         return []
-    
+
     try:
-        response = supabase.table("chat_sessions").select("history").eq("session_id", session_id).execute()
-        if response.data:
-            return response.data[0].get("history", [])
+        async with postgres_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT history FROM chat_sessions WHERE session_id = $1",
+                session_id,
+            )
+            if row and row["history"]:
+                return row["history"]
     except Exception as e:
-        print(f"Error fetching session history: {e}")
-    
+        print(f"Error fetching session history from PostgreSQL: {e}")
+
     return []
 
+
 async def save_session_history(session_id: str, history: list[dict]):
-    if not supabase:
+    if postgres_pool is None:
         return
-    
+
     try:
-        data = {
-            "session_id": session_id,
-            "history": history,
-            "updated_at": "now()"
-        }
-        
-        supabase.table("chat_sessions").upsert(data).execute()
+        async with postgres_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO chat_sessions (session_id, history, updated_at)
+                VALUES ($1, $2::jsonb, NOW())
+                ON CONFLICT (session_id) DO UPDATE
+                SET history = EXCLUDED.history,
+                    updated_at = NOW()
+                """,
+                session_id,
+                json.dumps(history),
+            )
     except Exception as e:
-        print(f"Error saving session history: {e}")
+        print(f"Error saving session history to PostgreSQL: {e}")
+
 
 async def delete_session(session_id: str):
-    if not supabase:
+    if postgres_pool is None:
         return
-    
+
     try:
-        supabase.table("chat_sessions").delete().eq("session_id", session_id).execute()
+        async with postgres_pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM chat_sessions WHERE session_id = $1",
+                session_id,
+            )
     except Exception as e:
-        print(f"Error deleting session: {e}")
+        print(f"Error deleting session from PostgreSQL: {e}")

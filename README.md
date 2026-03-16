@@ -52,6 +52,49 @@ Menginstruksikan backend untuk mengambil dokumen dari URL (misal: S3/UploadThing
 - **CORS**: Sudah diaktifkan untuk semua origin (`*`) pada lingkungan development.
 - **Authentication**: Saat ini tidak memerlukan auth header, namun pastikan API Key sudah terpasang di `.env` backend.
 - **Format Data**: Selalu gunakan `Content-Type: application/json` kecuali untuk upload file.
+- **Database Session**: Backend memakai PostgreSQL langsung melalui `DATABASE_URL`.
+
+## Setup PostgreSQL Lokal / VPS
+
+Backend ini memakai PostgreSQL biasa untuk menyimpan `chat_sessions`.
+
+### 1. Jalankan PostgreSQL di Docker
+```bash
+docker run -d \
+  --name cluely-postgres \
+  --restart unless-stopped \
+  -e POSTGRES_DB=cluely \
+  -e POSTGRES_USER=cluely_user \
+  -e POSTGRES_PASSWORD=ganti-password-kuat \
+  -p 5432:5432 \
+  -v cluely-postgres-data:/var/lib/postgresql/data \
+  postgres:16
+```
+
+### 2. Set `.env` backend
+```env
+DATABASE_URL=postgresql://cluely_user:ganti-password-kuat@IP_VPS_ANDA:5432/cluely
+GROQ_API_KEY=your-groq-key
+JINA_API_KEY=your-jina-key
+QDRANT_URL=http://IP_VPS_ANDA:6333
+QDRANT_API_KEY=
+```
+
+### 3. Tabel session
+Tabel `chat_sessions` akan dibuat otomatis saat backend startup. Skemanya:
+
+```sql
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  session_id TEXT PRIMARY KEY,
+  history JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### 4. Cek koneksi dari VPS
+```bash
+docker exec -it cluely-postgres psql -U cluely_user -d cluely -c '\dt'
+```
 
 ## Contoh Integrasi (Fetch API)
 ```javascript
