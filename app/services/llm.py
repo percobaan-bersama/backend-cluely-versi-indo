@@ -7,8 +7,7 @@ load_dotenv()
 client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
 MODELS = [
-    "llama3-70b-8192",
-    "llama3-8b-8192"
+   "llama-3.1-8b-instant"
 ]
 
 SYSTEM_PROMPT = (
