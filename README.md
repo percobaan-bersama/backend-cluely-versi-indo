@@ -54,6 +54,23 @@ Menginstruksikan backend untuk mengambil dokumen dari URL (misal: S3/UploadThing
 - **Format Data**: Selalu gunakan `Content-Type: application/json` kecuali untuk upload file.
 - **Database Session**: Backend memakai PostgreSQL langsung melalui `DATABASE_URL`. Kalau `DATABASE_URL` tidak diisi, backend fallback ke `127.0.0.1:5432` dengan default `DB_NAME=cluely`, `DB_USER=password`, `DB_PASSWORD=password`.
 
+## Docker Compose PostgreSQL
+
+Kalau hanya ingin menyalakan container PostgreSQL, gunakan:
+
+```bash
+docker compose up -d postgres
+```
+
+Compose ini hanya menjalankan service `postgres`, dengan env:
+
+```env
+DB_NAME=cluely
+DB_USER=password
+DB_PASSWORD=password
+DB_PORT=5432
+```
+
 ## Setup PostgreSQL Lokal / VPS
 
 Backend ini memakai PostgreSQL biasa untuk menyimpan `chat_sessions`.
