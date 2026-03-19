@@ -30,9 +30,18 @@ async def initialize_database():
     if not database_url or postgres_pool is not None:
         return
 
+    async def init(conn):
+        await conn.set_type_codec(
+            'jsonb',
+            encoder=json.dumps,
+            decoder=json.loads,
+            schema='pg_catalog'
+        )
+
     try:
         postgres_pool = await asyncpg.create_pool(
             dsn=database_url,
+            init=init,
             min_size=1,
             max_size=5,
         )
@@ -73,7 +82,8 @@ async def get_session_history(session_id: str) -> list[dict]:
                 session_id,
             )
             if row and row["history"]:
-                return row["history"]
+                history = row["history"]
+                return history if isinstance(history, list) else []
     except Exception as e:
         print(f"Error fetching session history from PostgreSQL: {e}")
 
@@ -95,7 +105,7 @@ async def save_session_history(session_id: str, history: list[dict]):
                     updated_at = NOW()
                 """,
                 session_id,
-                json.dumps(history),
+                history,
             )
     except Exception as e:
         print(f"Error saving session history to PostgreSQL: {e}")
