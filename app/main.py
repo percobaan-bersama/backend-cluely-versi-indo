@@ -6,29 +6,24 @@ import os
 import json
 
 import asyncio
-from app.services.rag import get_rag_suggestion, ingest_document_from_url, is_index_empty, initialize_rag_service
-from app.services.llm import get_streaming_response
-from app.services.database import (
-    close_database,
-    delete_session,
-    get_session_history,
-    initialize_database,
-    save_session_history,
-)
+from app.services.rag import RAG
+from app.services.llm import LLM
+from app.services.database import Database
 
 from fastapi.middleware.cors import CORSMiddleware
-
+db = Database()
+rag = RAG()
 app = FastAPI(title="Cluely V2", description="Meeting/Interview Conversation Assistant")
-
+llm = LLM()
 @app.on_event("startup")
 async def startup_event():
-    await initialize_database()
-    await initialize_rag_service()
+    await db.initialize_database()
+    await rag.initialize_rag_service()
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    await close_database()
+    await db.close_database()
 
 
 app.add_middleware(
@@ -67,8 +62,8 @@ async def transcribe(request: TranscriptionRequest):
 async def chat(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
     
-    history_task = get_session_history(session_id)
-    index_empty_task = is_index_empty()
+    history_task = db.get_session_history(session_id)
+    index_empty_task = rag.is_index_empty()
     
     history, rag_empty = await asyncio.gather(history_task, index_empty_task)
     
@@ -77,9 +72,9 @@ async def chat(request: ChatRequest):
     
     if rag_empty:
         print("RAG is empty, falling back to standard LLM")
-        response_stream = get_streaming_response(history)
+        response_stream = llm.get_streaming_response(conversation_history=history)
     else:
-        response_stream = await get_rag_suggestion(request.message, chat_history=history[:-1])
+        response_stream = await rag.get_rag_suggestion(request.message, chat_history=history[:-1])
         print("wait for RAG")
     
     async def event_generator():
@@ -107,7 +102,7 @@ async def chat(request: ChatRequest):
 
         if full_response:
             history.append({"role": "assistant", "content": full_response})
-            await save_session_history(session_id, history)
+            await db.save_session_history(session_id, history)
     
     return StreamingResponse(
         event_generator(), 
@@ -122,11 +117,11 @@ async def chat(request: ChatRequest):
 @app.post("/api/session/clear")
 async def clear_session(session_id: str = ""):
     if session_id:
-        await delete_session(session_id)
+        await db.delete_session(session_id)
         return {"status": "cleared"}
     return {"status": "session_id_required"}
 
 @app.post("/api/ingest")
 async def ingest_file(request: IngestRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(ingest_document_from_url, request.url, request.filename)
+    background_tasks.add_task(rag.ingest_document_from_url, request.url, request.filename)
     return {"status": "processing", "message": f"File {request.filename} sedang diproses di background."}
