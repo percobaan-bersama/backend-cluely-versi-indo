@@ -31,3 +31,4 @@ data/
 storage/
 *.log
 .ipynb_checkpoints/
+pat.txt
