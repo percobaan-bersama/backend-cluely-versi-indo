@@ -9,6 +9,7 @@ import qdrant_client
 from llama_index.core.settings import Settings
 from llama_index.core.llms import ChatMessage, MessageRole
 from dotenv import load_dotenv
+from app.services.llm import trim_history_to_window, MEMORY_WINDOW_TURNS
 
 load_dotenv()
 
@@ -147,9 +148,12 @@ class RAG :
                 
                 history_messages = []
                 if chat_history:
-                    for msg in chat_history:
+                    # Trim ke 4 turn terakhir sebelum dikirim ke RAG engine
+                    windowed_history = trim_history_to_window(chat_history, k=MEMORY_WINDOW_TURNS)
+                    for msg in windowed_history:
                         role = MessageRole.USER if msg["role"] == "user" else MessageRole.ASSISTANT
                         history_messages.append(ChatMessage(role=role, content=msg["content"]))
+
 
                 chat_engine = index.as_chat_engine(
                     chat_mode="context",
