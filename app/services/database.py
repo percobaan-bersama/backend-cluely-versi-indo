@@ -123,3 +123,36 @@ class Database:
                 )
         except Exception as e:
             print(f"Error deleting session from PostgreSQL: {e}")
+
+    async def get_all_sessions(self) -> list[dict]:
+        if self.postgres_pool is None:
+            return []
+
+        try:
+            async with self.postgres_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT session_id, history, updated_at FROM chat_sessions ORDER BY updated_at DESC"
+                )
+                sessions = []
+                for row in rows:
+                    history = row["history"]
+                    title = "New Chat"
+                    if history and isinstance(history, list) and len(history) > 0:
+                        # Find the first user message for title
+                        for msg in history:
+                            if msg.get("role") == "user":
+                                title = msg.get("content", "")[:50] + ("..." if len(msg.get("content", "")) > 50 else "")
+                                break
+                    
+                    sessions.append({
+                        "session_id": row["session_id"],
+                        "title": title,
+                        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None
+                    })
+                return sessions
+        except Exception as e:
+            print(f"Error fetching all sessions from PostgreSQL: {e}")
+            return []
+
+    async def get_session_by_id(self, session_id: str) -> list[dict]:
+        return await self.get_session_history(session_id)

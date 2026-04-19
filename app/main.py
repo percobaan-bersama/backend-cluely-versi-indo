@@ -121,6 +121,16 @@ async def clear_session(session_id: str = ""):
         return {"status": "cleared"}
     return {"status": "session_id_required"}
 
+@app.get("/api/history")
+async def get_history():
+    sessions = await db.get_all_sessions()
+    return {"sessions": sessions}
+
+@app.get("/api/history/{session_id}")
+async def get_session_history(session_id: str):
+    history = await db.get_session_by_id(session_id)
+    return {"history": history}
+
 @app.post("/api/ingest")
 async def ingest_file(request: IngestRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(rag.ingest_document_from_url, request.url, request.filename)
